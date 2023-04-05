@@ -1,0 +1,71 @@
+{% extends "ds4rs/base.html" %}
+{% load static %}
+{% block content %}
+
+
+
+<div class="container-fluid">
+  <!-- <p>This example demonstrates a 50%/50% split on small, medium and large devices. On extra small devices, it will stack (100% width).</p>      
+  <p>Resize the browser window to see the effect.</p>       -->
+  <div class="row">
+    <div class="col-sm-7">
+      <div class="w3-content w3-section" style="max-width:100%">
+        <img class="mySlides" src="{% static 'ds4rs/assets/img/hero-carousel/hero-carousel-3.svg' %}" style="width: 75%">
+        <img class="mySlides" src="{% static 'ds4rs/assets/img/hero-carousel/earthquake_city_satellite.svg' %}" style="width:75%">
+        <img class="mySlides" src="{% static 'ds4rs/assets/img/hero-carousel/Word_simple_colored_NE_data.svg' %}" style="width:75%">
+      </div>
+    </div>
+    <div class="col-sm-5">
+      <br><h1>Welcome to <span>DS4RS</span></h1>
+      <br><br>
+      <h4><span>Datascience Dashboard for Remotesensing</span></h4>
+      <p>The main aim of these project is to analyse remotesensing imageries programatically and provide easy to extract informations for the researchers</p>
+    </div>
+    
+    </div>
+  </div>
+</div>
+
+<div>
+  <!-- <div class="w3-content w3-section" style="max-width:100%">
+    <img class="mySlides" src="{% static 'ds4rs/assets/img/hero-carousel/hero-carousel-3.svg' %}" style="width:50%">
+    <img class="mySlides" src="{% static 'ds4rs/assets/img/services-5.jpg' %}" style="width:50%">
+    <img class="mySlides" src="{% static 'ds4rs/assets/img/services-6.jpg' %}" style="width:50%">
+  </div> -->
+
+
+  <div>
+    <!-- <section id="hero-animated" class="hero-animated d-flex align-items-center">
+      <div class="container d-flex flex-column justify-content-center align-items-center text-center position-relative" data-aos="zoom-out">
+        <img src="{% static 'ds4rs/assets/img/hero-carousel/hero-carousel-3.svg' %}"  class="img-fluid animated">
+        <h2>Welcome to <span>DS4RS</span></h2>
+        <p>Et voluptate esse accusantium accusamus natus reiciendis quidem voluptates similique aut.</p>
+        <div class="d-flex">
+          <a href="#about" class="btn-get-started scrollto">Get Started</a>
+          <a href="https://www.youtube.com/watch?v=LXb3EKWsInQ" class="glightbox btn-watch-video d-flex align-items-center"><i class="bi bi-play-circle"></i><span>Watch Video</span></a>
+        </div>
+      </div>
+    </section> -->
+  </div>
+</div>
+<!-- slideshow -->
+
+<!-- JavaScript -->
+<script>
+  var myIndex = 0;
+  carousel();
+  
+  function carousel() {
+    var i;
+    var x = document.getElementsByClassName("mySlides");
+    for (i = 0; i < x.length; i++) {
+      x[i].style.display = "none";  
+    }
+    myIndex++;
+    if (myIndex > x.length) {myIndex = 1}    
+    x[myIndex-1].style.display = "block";  
+    setTimeout(carousel, 2000); // Change image every 2 seconds
+  }
+  </script>
+
+{% endblock content %}

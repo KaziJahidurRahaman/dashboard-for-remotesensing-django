@@ -1,0 +1,82 @@
+{% extends "ds4rs_app1/base.html" %}
+{% load static %}
+{% block content %}
+<div class="container-fluid">
+    <h1>{{title}}</h1>
+    <div></div>
+    <div>
+        <form action="{% url 'ds4rs-ndbi-chart'%}" method="post" enctype="multipart/form-data" multiple >
+            {% csrf_token %}
+            <div class="form-group row">
+              <label for="fromDate" class="col-sm-2 col-form-label">From Date</label>
+              <div class="col-sm-10">
+                <input type="date" class="form-control" id="fromDate" name = "fromDate">
+              </div>
+            </div>
+
+            <div class="form-group row">
+              <label for="toDate" class="col-sm-2 col-form-label">To Date</label>
+              <div class="col-sm-10">
+                <input type="date" class="form-control" id="toDate" name= "toDate">
+              </div>
+            </div>
+
+            <div class="form-group row">
+                <label for="cloudCover" class="col-sm-2 col-form-label">Cloudcover</label>
+                <div class="col-sm-10">
+                  <input type="number" class="form-control" id="cloudCover" name="cloudCover" placeholder="Cloudcover">
+                </div>
+              </div>
+
+            <fieldset class="form-group">
+              <div class="row">
+                <legend class="col-form-label col-sm-2 pt-0">Satellite Name</legend>
+                <div class="col-sm-10">
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="satelliteName" id="satelliteName1" value="landsat7" checked>
+                    <label class="form-check-label" for="satelliteName1">
+                      Landsat 7
+                    </label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="satelliteName" id="satelliteName2" value="landsat8">
+                    <label class="form-check-label" for="gridRadios2">
+                      Landsat 8
+                    </label>
+                  </div>
+                  <div class="form-check disabled">
+                    <input class="form-check-input" type="radio" name="satelliteName" id="satelliteName3" value="sentinel2" disabled>
+                    <label class="form-check-label" for="satelliteName3">
+                      Sentinel 2
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+            <div class="form-group row">
+                <label for="aoiShapeFile" class="col-sm-2 col-form-label">AOI Shape File</label>
+                <div class="col-sm-10">
+                  <input type="file" class="form-control" id="aoiShapeFile" multiple name="aoiShapeFile" accept="">
+                </div>
+            </div>
+
+            <div class="form-group row">
+              <div class="col-sm-10">
+                <button type="submit" name="submit"  class="btn btn-primary"> Generate NDBI</button>
+              </div>
+            </div>
+          </form>
+    </div>
+</div>
+
+
+<!-- JavaScript -->
+<script>
+</script>
+{% endblock content %}
+
+
+
+
+
