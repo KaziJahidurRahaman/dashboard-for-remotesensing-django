@@ -231,10 +231,26 @@ def save_data(fromDate,toDate,cloudCover, satelliteName, files):
                 'totalNumofImages': landsat_list_size
             }
 
+            # Clean up uploaded files
+            for pk in pks:
+                try:
+                    db_file = NdbiTask.objects.get(pk=pk)
+                    # Delete the uploaded files or perform necessary cleanup
+                    db_file.delete()  # This deletes the database record and the associated file
+                except NdbiTask.DoesNotExist:
+                    pass  # Handle if the record does not exist
+
 
             return chartInfo        
-        # if file format is not shp we do not process. Just continue to next iteration
-        else:
+        else:    # if file format is not shp we do not process. Just continue to next iteration
             continue 
+        
+        for pk in pks: # Clean up uploaded files
+            try:
+                db_file = NdbiTask.objects.get(pk=pk)
+                # Delete the uploaded files or perform necessary cleanup
+                db_file.delete()  # This deletes the database record and the associated file
+            except NdbiTask.DoesNotExist:
+                pass  # Handle if the record does not exist
 
         return

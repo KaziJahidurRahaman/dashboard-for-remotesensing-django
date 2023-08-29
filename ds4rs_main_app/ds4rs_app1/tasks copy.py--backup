@@ -1,0 +1,440 @@
+import json
+import os
+import folium
+from osgeo import ogr
+from osgeo import osr
+from django.contrib.gis.geos import GEOSGeometry
+from django.conf import settings
+from celery import shared_task
+
+from .models import NdbiTask, Shapefile, Geometry,LSTMapTask
+from django.contrib.gis.gdal import DataSource
+
+import pathlib
+import geemap
+import ee
+import numpy as np
+import ee
+from google.auth import compute_engine
+import pandas as pd
+import warnings
+import altair as alt
+import pandas as pd
+
+#folium
+import folium
+from folium import plugins
+
+
+
+
+
+
+
+def get_ndbi(img, aoi):
+    
+    img_date = img.date().getInfo()['value']
+    img_sytemindex = img.get('system:index').getInfo()
+  
+    nir  = img.select('B4') #picking the near infrared band from the img
+    swir = img.select('B5') #picking short wave infrared
+    
+    ndbi = swir.subtract(nir).divide(swir.add(nir)).rename('NDBI')
+    
+    return ndbi
+
+
+def get_ndbi_info(img, aoi):
+    
+    img_date = img.date().getInfo()['value']
+    img_sytemindex = img.get('system:index').getInfo()
+  
+    nir  = img.select('B4') #picking the near infrared band from the img
+    swir = img.select('B5') #picking short wave infrared
+    
+    ndbi = swir.subtract(nir).divide(swir.add(nir)).rename('NDBI')
+    
+    min_ndbi_val = ndbi.reduceRegion(ee.Reducer.min(), aoi, 30,  crs = 'EPSG:32648', bestEffort = True, maxPixels = 1e9).getInfo()['NDBI']
+    max_ndbi_val = ndbi.reduceRegion(ee.Reducer.max(), aoi, 30,  crs = 'EPSG:32648', bestEffort = True, maxPixels = 1e9).getInfo()['NDBI']
+    mean_ndbi_val = ndbi.reduceRegion(ee.Reducer.mean(), aoi, 30,  crs = 'EPSG:32648', bestEffort = True, maxPixels = 1e9).getInfo()['NDBI']
+    
+    img_all_info = {
+      'system:index': img_sytemindex,
+      'date': img_date,
+      'min_ndbi' : min_ndbi_val,
+      'max_ndbi' : max_ndbi_val,
+      'mean_ndbi' : mean_ndbi_val      
+      }
+
+    return img_all_info
+
+def add_date_info(df):
+  df['Timestamp'] = pd.to_datetime(df['Millis'], unit='ms')
+  df['Year'] = pd.DatetimeIndex(df['Timestamp']).year
+  df['Month'] = pd.DatetimeIndex(df['Timestamp']).month
+  df['Day'] = pd.DatetimeIndex(df['Timestamp']).day
+  df['DOY'] = pd.DatetimeIndex(df['Timestamp']).dayofyear
+  return df
+
+#clipping
+def fctn_clip(img,aoi):
+  clip_img = img.clip(aoi)
+  return clip_img
+
+
+
+service_account = settings.GEE_SERVICE_ACC
+credentials = ee.ServiceAccountCredentials(service_account, settings.GEE_CREDS)
+ee.Initialize(credentials)
+
+
+
+
+@shared_task
+def save_data(fromDate,toDate,cloudCover, satelliteName, files):
+    pks = json.loads(files)
+
+
+    cloudCover_ee = ee.Number(int(cloudCover))
+    from_year_ee = ee.Number(int(fromDate.split('-')[0]))
+    from_month_ee = ee.Number(int(fromDate.split('-')[1]))
+    from_day_ee = ee.Number(int(fromDate.split('-')[2]))
+
+    
+    to_year_ee = ee.Number(int(toDate.split('-')[0]))
+    to_month_ee = ee.Number(int(toDate.split('-')[1]))
+    to_day_ee = ee.Number(int(toDate.split('-')[2]))
+
+
+    if satelliteName == 'landsat7':
+        satelliteName = str.upper(satelliteName)
+    elif satelliteName == 'landsat8':
+        satelliteName = str.upper(satelliteName)
+    elif satelliteName == 'sentinel2':
+        satelliteName == str.upper(satelliteName)
+    else:
+        print('Satellite Not Added Yet!')
+
+    print(satelliteName)
+
+
+    files = NdbiTask.objects.filter(pk__in=pks)
+    for file in files:
+        print(file.filename)
+        ext = file.filename().split('.')[1]
+        if ext == 'shp':
+            file_path = os.path.join(str(settings.BASE_DIR).replace('\\', '/')+ file.aoiShape.url)
+
+            aoi = geemap.shp_to_ee(file_path)
+            print('Loading aoi shape path to ee done')
+
+            # import numpy as np
+            # aoi_geometry = aoi.geometry()
+            # coords = aoi_geometry.getInfo()['coordinates']
+            # mapBoundary = coords[0][1]
+
+            # coords = np.array(coords[0])
+
+            # today = ee.Date(pd.to_datetime('today'))
+            # date_range = ee.DateRange(today.advance(-5, 'years'), today)
+            
+            landsat =  ee.ImageCollection('LANDSAT/LC08/C01/T1_TOA').filterBounds(aoi)\
+                        .filter(ee.Filter.lt('CLOUD_COVER', cloudCover_ee)).filter(ee.Filter.calendarRange(from_year_ee,to_year_ee,'year'))\
+                            .filter(ee.Filter.calendarRange(from_month_ee,to_month_ee,'month'))
+            
+                        
+            print("Total Image Downloaded: ",landsat.size().getInfo()) #gets the total number of images
+
+            if landsat.size().getInfo() < 1:
+               print('Insufficient Image Downloaded for a time series analysis')
+
+            landsat_list = landsat.toList(landsat.size()) # the landsat image collection is an imagecollection object which is 
+                                                            #an earthengine native datatype. this collections can not be iterated by loop. 
+                                                            #So we have to convert it to a list or array to iteratively process it. 
+            
+            
+            landsat_list_size = landsat_list.size().getInfo()
+  
+            warnings.filterwarnings('ignore')
+
+  
+            df = pd.DataFrame(columns=['SystemIndex', 'Millis', 'MinNDBI', 'MaxNDBI', 'MeanNDBI'])
+
+            for i in range(landsat_list_size):
+                image = ee.Image(landsat_list.get(i))
+                image = fctn_clip(image, aoi)
+
+                # image_ndbi = get_ndbi(image, aoi)
+
+
+
+                # map.add_ee_layer(image_ndbi, image_vis_params, 'LandsatFirst')
+                # map.add_child(folium.LayerControl())
+
+
+
+                print(i)
+                image_info = get_ndbi_info(image, aoi)
+                print( image_info['system:index'])
+                df = df.append({'SystemIndex': image_info['system:index'], 
+                                'Millis':  image_info['date'], 
+                                'MinNDBI': image_info['min_ndbi'], 
+                                'MaxNDBI': image_info['max_ndbi'], 
+                                'MeanNDBI': image_info['mean_ndbi']}, 
+                                ignore_index=True)
+
+            df = add_date_info(df).drop(columns=['Millis'])
+
+
+
+
+            # fig = alt.Chart(df).transform_fold(['MinNDBI', 'MaxNDBI', 'MeanNDBI'],as_=['NDBI_Type', 'Value']
+            #                                    ).mark_line().encode(x='Timestamp:T',y='Value:Q',color='NDBI_Type:N')
+
+
+
+            #################################################
+
+
+            highlight = alt.selection(
+            type='single', on='mouseover', fields=['Timestamp'], nearest=True)
+
+            fig = alt.Chart(df).transform_fold(['MinNDBI', 'MaxNDBI', 'MeanNDBI'],as_=['NDBI_Type', 'Value']).mark_line().encode(
+                x='Timestamp:T',
+                y='Value:Q',
+                color=alt.Color('NDBI_Type:N', scale=alt.Scale(range=['#FF5733', '#000000', '#00ffff'])))
+
+
+            value_lines = fig.mark_line().encode(
+            opacity=alt.value(0),
+            tooltip=[
+            alt.Tooltip('Timestamp:T', format='%Y-%m-%d', title='Date'),
+            alt.Tooltip('DOY:Q', title='DOY'),
+            alt.Tooltip('Value:Q', title='NDBI Value'),
+            alt.Tooltip('NDBI_Type:N', title='NDBI Type'),
+            alt.Tooltip('SystemIndex:N', title='SystemIndex')
+            ]).add_selection(highlight)
+
+            lines = fig.mark_line().encode(
+            size=alt.condition(~highlight, alt.value(1), alt.value(3)))
+
+            fig_interactive = (value_lines + lines).properties(width=600, height=350).interactive()
+
+
+
+
+
+            #################################################
+
+
+
+
+
+
+
+            
+            # fig.save('chart.html')
+
+            # print(fig)
+
+            chartInfo = {
+                'fig': fig_interactive,
+                'totalNumofImages': landsat_list_size
+            }
+
+
+            return chartInfo        
+        # if file format is not shp we do not process. Just continue to next iteration
+        else:
+            continue 
+
+        return
+    
+
+# LST Layers Generation
+def gennerateLstLayer(fromDate,toDate,cloudCover, satelliteName, files):
+    print('------generateLstLayer Task Loading-----')
+    pks = json.loads(files)
+
+
+    cloudCover_ee = ee.Number(int(cloudCover))
+    from_year_ee = ee.Number(int(fromDate.split('-')[0]))
+    from_month_ee = ee.Number(int(fromDate.split('-')[1]))
+    from_day_ee = ee.Number(int(fromDate.split('-')[2]))
+
+    
+    to_year_ee = ee.Number(int(toDate.split('-')[0]))
+    to_month_ee = ee.Number(int(toDate.split('-')[1]))
+    to_day_ee = ee.Number(int(toDate.split('-')[2]))
+
+
+    if satelliteName == 'landsat7':
+        satelliteName = str.upper(satelliteName)
+    elif satelliteName == 'landsat8':
+        satelliteName = str.upper(satelliteName)
+    elif satelliteName == 'sentinel2':
+        satelliteName == str.upper(satelliteName)
+    else:
+        print('Satellite Not Added Yet!')
+
+
+
+
+    
+    figure = folium.Figure()
+    
+    #create Folium Object
+    m = folium.Map(
+        location=[28.5973518, 83.54495724],
+        zoom_start=8
+    )
+
+    # add map to figure
+    m.add_to(figure)
+
+
+    files = LSTMapTask.objects.filter(pk__in=pks)
+    for file in files:
+        # print(file.filename())
+        # continue
+        ext = file.filename().split('.')[1]
+        if ext == 'shp':
+            file_path = os.path.join(str(settings.BASE_DIR).replace('\\', '/')+ file.aoiShape.url)
+
+            aoi = geemap.shp_to_ee(file_path)
+            print('Loading aoi shape path to ee done')
+
+            # import numpy as np
+            # aoi_geometry = aoi.geometry()
+            # coords = aoi_geometry.getInfo()['coordinates']
+            # mapBoundary = coords[0][1]
+
+            # coords = np.array(coords[0])
+
+            # today = ee.Date(pd.to_datetime('today'))
+            # date_range = ee.DateRange(today.advance(-5, 'years'), today)
+            
+            landsat =  ee.ImageCollection('LANDSAT/LC08/C01/T1_TOA').filterBounds(aoi)\
+                        .filter(ee.Filter.lt('CLOUD_COVER', cloudCover_ee)).filter(ee.Filter.calendarRange(from_year_ee,to_year_ee,'year'))\
+                            .filter(ee.Filter.calendarRange(from_month_ee,to_month_ee,'month'))
+            print("Total Image Downloaded: ",landsat.size().getInfo()) #gets the total number of images
+
+
+
+            best_image = landsat.sort('CLOUD_COVER').first().clip(aoi)
+            
+            #Picking the required bands
+            nir_band = best_image.select('B5')
+            red_band = best_image.select('B4')
+            thermal_band = best_image.select('B10')
+            
+            # Compute the NDVI for clipped images/aoi
+            ndvi = (nir_band.subtract(red_band)).divide(  (nir_band.add(red_band)) ).rename('NDVI')
+            ##MIN NDVI VALUE
+
+            # visualize the ndvi
+            ndviPar = {
+                'min': -1, 
+                'max': 1, 
+                'palette': ['red', 'yellow', 'green']
+                    }
+
+            
+            #add the map to the the folium map
+            ndvi_map_id_dict = ee.Image(ndvi).getMapId(ndviPar)
+
+            #GEE raster data to TileLayer
+            folium.raster_layers.TileLayer(
+                        tiles = ndvi_map_id_dict['tile_fetcher'].url_format,
+                        attr = 'Google Earth Engine',
+                        name = 'NDVI',
+                        overlay = True,
+                        control = True
+                        ).add_to(m)
+
+
+            min_ndvi = ee.Number(ndvi.reduceRegion(**{
+            "reducer": ee.Reducer.min(),
+            "scale": 30,
+            "maxPixels": 10**9
+            }).values().get(0))
+            print('min value of NDVI',min_ndvi.getInfo())
+
+            max_ndvi = ee.Number(ndvi.reduceRegion(**{
+                "reducer": ee.Reducer.max(),
+                "scale": 30,
+                "maxPixels": 10**9
+                }).values().get(0))
+            print('max value of NDVI',max_ndvi.getInfo())
+
+            #proportional vegetation
+            pv =(ndvi.subtract(min_ndvi).divide(max_ndvi.subtract(min_ndvi))).pow(ee.Number(2)).rename('PV')
+            pv_max = ee.Number(pv.reduceRegion(**{
+            "reducer": ee.Reducer.max(),
+            "scale": 30,
+            "maxPixels": 10**9
+            }).values().get(0));
+            print( 'max value of pv',pv_max.getInfo())
+
+
+            ##MIN pv VALUE
+            min_pv = ee.Number(pv.reduceRegion(**{
+            "reducer": ee.Reducer.min(),
+            "scale": 30,
+            "maxPixels": 10**9
+            }).values().get(0))
+            print('min value of pv',min_pv.getInfo())
+
+            #Emissivity
+            a= ee.Number(0.004)
+            b= ee.Number(0.986)
+            em=pv.multiply(a).add(b).rename('EM')
+
+            emmax = ee.Number(em.reduceRegion(**{
+                "reducer": ee.Reducer.max(),
+                "scale": 30,
+                "maxPixels": 10**9
+                }).values().get(0))
+            print(emmax.getInfo())
+
+
+            emmin = ee.Number(em.reduceRegion(**{
+                "reducer": ee.Reducer.min(),
+                "scale": 30,
+                "maxPixels": 10**9
+                }).values().get(0))
+            print(emmin.getInfo())
+
+
+            # Land surface temperature (LST) in C
+            LST = thermal_band.expression(
+                '(Tb/(1 + (10.8* (Tb / 14388))*log(EM)))-273.15', {
+                'Tb': thermal_band,
+                'EM': em.select('EM')
+                }).rename('LST')
+            
+            LSTParams = {
+                'min':20, 
+                'max':40, 
+                'palette': ['blue','green','yellow']
+                }
+            # m.addLayer(LST, LSTParams, 'LandSurfaceTemperature')
+            # m.center_object(aoi,zoom=10)
+
+            #add the map to the the folium map
+            lst_map_id_dict = ee.Image(LST).getMapId(LSTParams)
+            #GEE raster data to TileLayer
+            folium.raster_layers.TileLayer(
+                        tiles = lst_map_id_dict['tile_fetcher'].url_format,
+                        attr = 'Google Earth Engine',
+                        name = 'LST',
+                        overlay = True,
+                        control = True
+                        ).add_to(m)
+
+        
+            
+            #add Layer control
+            m.add_child(folium.LayerControl())
+            m = m._repr_html_()            
+    return m
