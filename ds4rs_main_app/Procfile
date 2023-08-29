@@ -1,0 +1,2 @@
+release: python manage.py migrate
+web: gunicorn ds4rs_main_app.wsgi --log-file=-
